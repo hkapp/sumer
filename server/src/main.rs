@@ -1,4 +1,6 @@
-use std::{io::{Read, Write}, mem::size_of, os::unix::net::UnixListener, path::PathBuf, slice, time::Duration};
+use std::{io::{Read, Write}, mem::size_of, os::unix::net::UnixListener, path::PathBuf, time::Duration};
+
+use common::shm::SharedMemory;
 
 fn main() {
     let my_pos = std::env::args().next().unwrap();
@@ -31,13 +33,17 @@ fn main() {
 
             // Open the shared memory and write a basic message
             // TODO send the name and size to the client
+            let target_name = "abc\0";
             let data_size = 128;
-            let (shm_fd, shm_ptr) = unsafe { common::share_memory(b"abc\0" as *const u8 as *const i8, data_size) };
-            let write_channel = unsafe { slice::from_raw_parts_mut(shm_ptr as *mut u8, data_size) };
+            let mut shm_mem = unsafe {
+                SharedMemory::new(target_name, data_size)
+                    .unwrap()
+            };
+            let write_channel = unsafe { shm_mem.as_slice_mut() };
+
             for (i, x) in write_channel.iter_mut().enumerate() {
                 *x = i as u8;
             }
-            unsafe { common::unshare_memory(shm_fd) };
         }
         _ => {
             println!("Something went wrong");

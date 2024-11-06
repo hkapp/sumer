@@ -1,5 +1,7 @@
 use core::str;
-use std::{io::{self, Read, Write}, mem::size_of, os::unix::net::UnixStream, path::PathBuf, slice, time::Duration};
+use std::{io::{self, Read, Write}, mem::size_of, os::unix::net::UnixStream, path::PathBuf, time::Duration};
+
+use common::shm::SharedMemory;
 
 fn main() {
     let my_pos = std::env::args().next().unwrap();
@@ -29,12 +31,16 @@ fn main() {
 
             // Link to shared memory and read data from the server
             // FIXME this is currently a data race!
+            let shm_name = "abc\0";
             let data_size = 128;
-            let (shm_fd, shm_ptr) = unsafe { common::share_memory(b"abc\0" as *const u8 as *const i8, data_size) };
-            let read_channel = unsafe { slice::from_raw_parts(shm_ptr as *const u8, data_size) };
+            let shm_mem = unsafe {
+                SharedMemory::new(shm_name, data_size)
+                    .unwrap()
+            };
+            let read_channel = unsafe { shm_mem.as_slice() };
+
             read_channel.iter()
                 .for_each(|x| println!("{x}"));
-            unsafe { common::unshare_memory(shm_fd) };
         }
         Err(e) => {
             match e.kind() {
