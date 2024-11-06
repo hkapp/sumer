@@ -1,6 +1,6 @@
-use std::{io::{Read, Write}, mem::size_of, os::unix::net::UnixListener, path::PathBuf, time::Duration};
+use std::{os::unix::net::UnixListener, path::PathBuf, time::Duration};
 
-use common::shm::SharedMemory;
+use common::{shm::SharedMemory, uds};
 
 fn main() {
     let my_pos = std::env::args().next().unwrap();
@@ -18,17 +18,10 @@ fn main() {
             println!("Connection successful");
             stream.set_write_timeout(Some(Duration::from_secs(1))).unwrap();
 
-            let my_message = b"This is a message from the server";
-            stream.write_all(&my_message.len().to_ne_bytes()).unwrap();
-            stream.write_all(my_message).unwrap();
+            let my_message = "This is a message from the server";
+            uds::write_string_null_terminate(&mut stream, my_message).unwrap();
 
-            let mut len_buffer = [0; size_of::<usize>()];
-            stream.read_exact(&mut len_buffer).unwrap();
-            let client_len = usize::from_ne_bytes(len_buffer);
-
-            let mut message_buffer = vec![0; client_len];
-            stream.read_exact(&mut message_buffer).unwrap();
-            let client_message = std::str::from_utf8(&message_buffer).unwrap();
+            let client_message = uds::read_null_terminated_string(&mut stream).unwrap();
             println!("{client_message}");
 
             // Open the shared memory and write a basic message
