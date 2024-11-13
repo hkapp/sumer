@@ -1,4 +1,4 @@
-use std::{io, os::unix::net::UnixStream, path::PathBuf, time::Duration};
+use std::{mem::size_of, io::{self, Read}, os::unix::net::UnixStream, path::PathBuf, time::Duration};
 
 use common::{shm::SharedMemory, uds};
 
@@ -21,12 +21,20 @@ fn main() {
             let server_message = uds::read_null_terminated_string(&mut stream).unwrap();
             println!("{server_message}");
 
+            // Receive shared memory info from the server
+            let mut usize_buffer = [0; size_of::<usize>()];
+            stream.read_exact(&mut usize_buffer).unwrap();
+            let shm_size = usize::from_ne_bytes(usize_buffer);
+
+            let mut shm_name = uds::read_null_terminated_string(&mut stream).unwrap();
+            // The string is read without a null terminator
+            // Add the null terminator now to make C APIs happy
+            shm_name.push('\0');
+            println!("Reading {shm_size} bytes from shared memory {shm_name}");
+
             // Link to shared memory and read data from the server
-            // FIXME this is currently a data race!
-            let shm_name = "abc\0";
-            let data_size = 128;
             let shm_mem = unsafe {
-                SharedMemory::new(shm_name, data_size)
+                SharedMemory::new(&shm_name, shm_size)
                     .unwrap()
             };
             let read_channel = unsafe { shm_mem.as_slice() };

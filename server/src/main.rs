@@ -1,4 +1,4 @@
-use std::{os::unix::net::UnixListener, path::PathBuf, time::Duration};
+use std::{io::Write, os::unix::net::UnixListener, path::PathBuf, time::Duration};
 
 use common::{shm::SharedMemory, uds};
 
@@ -11,7 +11,7 @@ fn main() {
     let _ = std::fs::remove_file(&dir);
 
     let listener = UnixListener::bind(&dir).unwrap();
-    println!("Listening to connections to {}", dir.display());
+    println!("Listening to connections on {}", dir.display());
 
     match listener.incoming().next() {
         Some(Ok(mut stream)) => {
@@ -25,18 +25,22 @@ fn main() {
             println!("{client_message}");
 
             // Open the shared memory and write a basic message
-            // TODO send the name and size to the client
             let target_name = "abc\0";
             let data_size = 128;
             let mut shm_mem = unsafe {
                 SharedMemory::new(target_name, data_size)
-                    .unwrap()
+                .unwrap()
             };
             let write_channel = unsafe { shm_mem.as_slice_mut() };
 
             for (i, x) in write_channel.iter_mut().enumerate() {
                 *x = i as u8;
             }
+            println!("Wrote {data_size} bytes to shared memory {target_name}");
+
+            // Send the shared memory info to the client
+            stream.write_all(&data_size.to_ne_bytes()).unwrap();
+            uds::write_string_null_terminate(&mut stream, target_name).unwrap();
         }
         _ => {
             println!("Something went wrong");
