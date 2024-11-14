@@ -1,4 +1,4 @@
-use std::{io::Write, os::unix::net::UnixListener, path::PathBuf, time::Duration};
+use std::{io::Write, os::unix::net::UnixListener, path::PathBuf, time::Duration, fs};
 
 use common::{shm::SharedMemory, uds};
 
@@ -24,18 +24,20 @@ fn main() {
             let client_message = uds::read_null_terminated_string(&mut stream).unwrap();
             println!("{client_message}");
 
+            // Read the data file
+            let data_to_send = fs::read_to_string("data/wiki.txt").unwrap();
+            let data_size = data_to_send.len(); // Returns the number of bytes
+
             // Open the shared memory and write a basic message
             let target_name = "abc\0";
-            let data_size = 128;
             let mut shm_mem = unsafe {
                 SharedMemory::new(target_name, data_size)
                 .unwrap()
             };
-            let write_channel = unsafe { shm_mem.as_slice_mut() };
 
-            for (i, x) in write_channel.iter_mut().enumerate() {
-                *x = i as u8;
-            }
+            let write_channel = unsafe { shm_mem.as_slice_mut() };
+            write_channel.copy_from_slice(data_to_send.as_bytes());
+
             println!("Wrote {data_size} bytes to shared memory {target_name}");
 
             // Send the shared memory info to the client

@@ -1,4 +1,4 @@
-use std::{mem::size_of, io::{self, Read}, os::unix::net::UnixStream, path::PathBuf, time::Duration};
+use std::{mem::size_of, io::{self, Read}, os::unix::net::UnixStream, path::PathBuf, time::Duration, str};
 
 use common::{shm::SharedMemory, uds};
 
@@ -37,10 +37,11 @@ fn main() {
                 SharedMemory::new(&shm_name, shm_size)
                     .unwrap()
             };
-            let read_channel = unsafe { shm_mem.as_slice() };
 
-            read_channel.iter()
-                .for_each(|x| println!("{x}"));
+            let read_channel = unsafe { shm_mem.as_slice() };
+            let shm_message = str::from_utf8(read_channel).unwrap();
+            assert!(shm_message.is_ascii());
+            println!("{shm_message}");
         }
         Err(e) => {
             match e.kind() {
