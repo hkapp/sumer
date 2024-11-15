@@ -18,14 +18,11 @@ fn main() {
             println!("Connection successful");
             stream.set_write_timeout(Some(Duration::from_secs(1))).unwrap();
 
-            let my_message = "This is a message from the server";
-            uds::write_string_null_terminate(&mut stream, my_message).unwrap();
-
-            let client_message = uds::read_null_terminated_string(&mut stream).unwrap();
-            println!("{client_message}");
+            let file_to_read = uds::read_null_terminated_string(&mut stream).unwrap();
+            println!("Reading {file_to_read} ...");
 
             // Read the data file
-            let data_to_send = fs::read_to_string("data/wiki.txt").unwrap();
+            let data_to_send = fs::read_to_string(file_to_read).unwrap();
             let data_size = data_to_send.len(); // Returns the number of bytes
 
             // Open the shared memory and write a basic message

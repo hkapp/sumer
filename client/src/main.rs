@@ -15,11 +15,9 @@ fn main() {
             println!("Connection successful");
             stream.set_write_timeout(Some(Duration::from_secs(1))).unwrap();
 
-            let my_message = "This is a message from the client";
-            uds::write_string_null_terminate(&mut stream, my_message).unwrap();
-
-            let server_message = uds::read_null_terminated_string(&mut stream).unwrap();
-            println!("{server_message}");
+            let file_to_read = "data/wiki.txt";
+            println!("Asking to read {file_to_read}");
+            uds::write_string_null_terminate(&mut stream, file_to_read).unwrap();
 
             // Receive shared memory info from the server
             let mut usize_buffer = [0; size_of::<usize>()];
