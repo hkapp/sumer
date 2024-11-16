@@ -2,6 +2,9 @@ use libc::{MAP_SHARED, O_RDWR, O_CREAT, PROT_WRITE, S_IRUSR, S_IWUSR};
 use libc::{c_char, off_t, c_int};
 use std::{ptr, slice};
 
+/* Shared Memory Stream */
+pub mod stream;
+
 type Fd = c_int;
 
 pub struct SharedMemory {
