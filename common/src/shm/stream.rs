@@ -56,13 +56,15 @@ pub enum Error {
     HandshakeFailed,
     PartnerDisconnected,
     /// Numeric value does not correspond to any known status
-    InvalidStatus(u64)
+    InvalidStatus(u64),
+    /// Must call `prepare_memory` before attempting to create streams
+    MemoryNotPrepared,
 }
 
 impl ShmHeaderFormat {
-    fn validated_cast(shm_ptr: *mut u8, shm_len: usize) -> Result<*mut Self, Error> {
+    unsafe fn from_raw_mut<'a>(shm_ptr: *mut u8, shm_len: usize) -> Result<&'a mut Self, Error> {
         if shm_len > size_of::<Self>() {
-            Ok(shm_ptr.cast())
+            Ok(&mut *shm_ptr.cast())
         }
         else {
             Err(Error::SharedMemoryNotLargeEnough)
@@ -102,6 +104,15 @@ impl TryFrom<u64> for Status {
             NOT_CONNECTED_STATUS => Ok(Status::NotConnected),
             CONNECTED_STATUS     => Ok(Status::Connected),
             _                    => Err(Error::InvalidStatus(value)),
+        }
+    }
+}
+
+impl From<Status> for u64 {
+    fn from(value: Status) -> Self {
+        match value {
+            Status::NotConnected => NOT_CONNECTED_STATUS,
+            Status::Connected    => CONNECTED_STATUS,
         }
     }
 }
@@ -222,13 +233,17 @@ impl MyRow {
     }
 }
 
+impl From<*mut ShmUsefulRow> for MyRow {
+    fn from(value: *mut ShmUsefulRow) -> Self {
+        Self {
+            row_ptr: value
+        }
+    }
+}
+
 // Read-only, should never write
 struct PartnerRow {
-    // TODO with the Atomics at the end of the path,
-    // we don't need a pointer here
-    // can use a proper Rust reference
-    // Actually no, need to introduce a function `row_ref()`
-    row_ptr:         *mut ShmUsefulRow
+    row_ptr: *mut ShmUsefulRow
 }
 
 impl PartnerRow {
@@ -268,6 +283,13 @@ impl PartnerRow {
     }
 }
 
+impl From<*mut ShmUsefulRow> for PartnerRow {
+    fn from(value: *mut ShmUsefulRow) -> Self {
+        Self {
+            row_ptr: value
+        }
+    }
+}
 
 /* Writer */
 // TODO add a discussion about safety at the top of the module
@@ -344,3 +366,83 @@ impl StreamWriter {
 }
 
 /* Reader */
+
+/* Builder */
+
+pub struct MemNotBigEnough(usize);
+
+const HEADER_SIZE: usize = size_of::<ShmHeaderFormat>();
+
+/// Warning: must only be done once
+/// Must be done before calling either new_writer or new_reader
+pub unsafe fn prepare_memory(addr: *mut u8, mem_sz: usize) -> Result<(), MemNotBigEnough> {
+    if mem_sz >= HEADER_SIZE {
+        // Rust's memset
+        addr.write_bytes(0, HEADER_SIZE);
+        Ok(())
+    }
+    else {
+        Err(MemNotBigEnough(HEADER_SIZE))
+    }
+}
+
+pub struct BuildWriter(StreamWriter);
+
+impl BuildWriter {
+    /// Memory must have been prepared with `prepare_memory`
+    pub unsafe fn new(addr: *mut u8, mem_sz: usize) -> Result<Self, Error> {
+        let header = ShmHeaderFormat::from_raw_mut(addr, mem_sz)?;
+        let my_row = &mut header.writer_row.useful;
+
+        // Validate that memory is cleared out
+        if my_row.count.load(ATOMIC_ORDER) != 0
+            || my_row.length.load(ATOMIC_ORDER) != 0
+            || my_row.status.load(ATOMIC_ORDER) != 0
+        {
+            return Err(Error::MemoryNotPrepared);
+        }
+
+        // Write our header data in order
+        // 1. length
+        // TODO validate that the cast is ok
+        my_row.length.store(mem_sz as u64, ATOMIC_ORDER);
+        // 2. status
+        // TODO introduce the following statuses: handhsake, aborted
+        // then rename connected to working
+        // TODO turn this into a function of the row
+        my_row.status.store(Status::Connected.into(), ATOMIC_ORDER);
+
+        let writer = StreamWriter {
+            anchor_ptr: addr,
+            data_len: mem_sz - HEADER_SIZE,
+            tot_bytes_written: 0,
+            cached_tot_bytes_read: 0,
+            partner_row: PartnerRow::from(&mut header.reader_row.useful as *mut _),
+            my_row: MyRow::from(my_row as *mut _),
+        };
+        Ok(BuildWriter(writer))
+    }
+
+    pub unsafe fn is_ready(&self) -> Result<bool, Error> {
+        // TODO validate the length
+        match self.0.partner_row.check_status() {
+            Ok(()) => Ok(true), // partner is connected
+            Err(Error::PartnerDisconnected) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub unsafe fn blocking_into(self) -> Result<StreamWriter, Error> {
+        self.wait_until_connected()?;
+        Ok(self.0)
+    }
+
+    unsafe fn wait_until_connected(&self) -> Result<(), Error> {
+        let mut waiter = ExpWait::new();
+        while !self.is_ready()? {
+            // TODO introduce a timeout
+            waiter.wait();
+        }
+        Ok(())
+    }
+}
